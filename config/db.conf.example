@@ -1,0 +1,5 @@
+[database]
+host = your-mysql-host
+user = your-db-user
+password = your-password
+database = bans
