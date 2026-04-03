@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS `ban_log` (
   `unbanned_at`     TEXT,
   `matches`         TEXT,
   `server_hostname` TEXT    NOT NULL,
+  `rcd_created_at`  TEXT    default (datetime('now'))
 
   -- Geolocation (via ip-api.com)
   `geo_fetched`        INTEGER NOT NULL,  -- 0 = fetch failed, 1 = fetch succeeded

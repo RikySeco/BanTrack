@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import socket
 from fail2ban.server.action import ActionBase
 
+#   Logging sul journal
 logger = logging.getLogger('db-write')
 logger.setLevel(logging.ERROR)
 logger.propagate = False
@@ -22,13 +23,16 @@ class Action(ActionBase):
 
         super().__init__(*args, **kwargs)
 
+        #   Recupero della configurazione del database
         dbconfig = configparser.ConfigParser()
         dbconfig.read('/etc/fail2ban/db.conf')
 
+        #   Exception
+        #   Mail notification!!!
         if 'database' not in dbconfig:
             dbconfig_error = "ERRORE: File di configurazione corrotto o inesistente!"
             logger.error(dbconfig_error)
-            #   Mail notify
+            #   Mail notification
             raise Exception(dbconfig_error)
         else:
             self.host = dbconfig['database']['host']
@@ -36,6 +40,7 @@ class Action(ActionBase):
             self.password = dbconfig['database']['password']
             self.database = dbconfig['database']['database']
 
+    #   Fallback function
     def sqlite_write(self, ip, jname, failures, bantime, matches, banned_at, unbanned_at, hostname, geo_fetched=0,
                      geo_continent_code=None,
                      geo_continent=None, geo_country_code=None, geo_country=None, geo_city=None, geo_latitude=None,
@@ -47,6 +52,7 @@ class Action(ActionBase):
         sqlite_conn = None
 
         try:
+            #   Sqlite DB conn
             sqlite_conn = sqlite3.connect('/var/lib/fail2ban/fallback.db')
             sqlite_cursor = sqlite_conn.cursor()
             query = """INSERT INTO ban_log (ip, jail_name, failures, banned_at, ban_duration, unbanned_at, matches,
@@ -67,13 +73,14 @@ class Action(ActionBase):
 
         except sqlite3.OperationalError as sqlite_error:
             logger.error(f"Errore nella scrittura del fallback: {sqlite_error}")
-            #   Mail notify
+            #   Mail notification!!!
             raise Exception(sqlite_error)
 
         finally:
             sqlite_cursor.close()
             sqlite_conn.close()
 
+    #   Definition of the regular db write function
     def write_mysql(self, ip, jname, failures, bantime, matches, banned_at, unbanned_at, hostname, geo_continent_code,
                     geo_continent, geo_country_code, geo_country, geo_city, geo_latitude, geo_longitude, geo_isp,
                     geo_org,
@@ -84,6 +91,7 @@ class Action(ActionBase):
 
         try:
 
+            #   DB connection
             mysql_conn = mysql.connector.connect(
                 host=self.host,
                 user=self.user,
@@ -91,8 +99,10 @@ class Action(ActionBase):
                 database=self.database
             )
 
+            #   Cursor creation
             mysql_cursor = mysql_conn.cursor()
 
+            #   Query with placeholder
             mysql_query = """
                           INSERT INTO ban_log (ip, jail_name, failures, banned_at, ban_duration, unbanned_at, matches,
                                                server_hostname, geo_continent_code, geo_continent, geo_country_code, \
@@ -120,7 +130,7 @@ class Action(ActionBase):
                 geo_city=geo_city, geo_latitude=geo_latitude, geo_longitude=geo_longitude, geo_isp=geo_isp,
                 geo_org=geo_org, geo_as=geo_as, geo_mobile=geo_mobile, geo_proxy=geo_proxy,
                 geo_hosting=geo_hosting, error=error)
-
+            #   Mail notification!!!
             raise Exception(error)
 
         finally:
@@ -132,22 +142,68 @@ class Action(ActionBase):
 
     def ban(self,aInfo):
 
+        #   Fetch of fail2ban arguments
         ip = str(aInfo['ip'])
+        restored = int(aInfo['restored'])
+        banned_at = datetime.fromtimestamp(aInfo['time'])
+
+        mysql_conn = None
+        mysql_cursor = None
+
+        if restored == 1:
+
+            try:
+
+                #   DB connection
+                mysql_conn = mysql.connector.connect(
+                    host=self.host,
+                    user=self.user,
+                    password=self.password,
+                    database=self.database
+                )
+
+                #   Cursor creation
+                mysql_cursor = mysql_conn.cursor()
+
+                mysql_update_query = """UPDATE ban_log
+                                        SET status=1
+                                      WHERE ip=%s AND banned_at=%s"""
+
+                mysql_update_values = (ip, banned_at)
+
+                mysql_cursor.execute(mysql_update_query, mysql_update_values)
+                mysql_conn.commit()
+
+            except mysql.connector.Error as mysql_update_error:
+                logger.error(f"Errore di scrittura di MySQL: {mysql_update_error}")
+                error = str(mysql_update_error)
+                #   Fallback write
+                #   Mail notification!!!
+                raise Exception(error)
+
+            finally:
+                if mysql_cursor:
+                    mysql_cursor.close()
+                if mysql_conn:
+                    mysql_conn.close()
+
+            return
+
+
         jname = self._jail.name
         failures = int(aInfo['failures'])
         bantime = int(aInfo['bantime'])
         matches = str(aInfo['matches'])
-        banned_at = datetime.fromtimestamp(aInfo['time'])
         unbanned_at = banned_at + timedelta(seconds=bantime)
         hostname = socket.gethostname()
 
+        #   Server hostname recognition
         if hostname == "rikyseco":
             hostname = "Homeserver"
         else:
             hostname = "VPS"
 
-
-
+        #   Fetch of the geo datas
         try:
             geo_response = requests.get(
                 "http://ip-api.com/json/" + ip + "?fields=status,message,continent,continentCode,country,countryCode,city,lat,lon,isp,org,as,mobile,proxy,hosting")
@@ -175,6 +231,7 @@ class Action(ActionBase):
                             geo_isp,
                             geo_org, geo_as, geo_mobile, geo_proxy, geo_hosting)
 
+            #   Case where ip-api replay status=fail
             else:
                 if geo_status == 'fail':
                     logger.error("Errore: Indirizzo IP non riconosciuto")
@@ -182,7 +239,7 @@ class Action(ActionBase):
                     self.sqlite_write(ip=ip, jname=jname, failures=failures, bantime=bantime, matches=matches,
                                  banned_at=banned_at,
                                  unbanned_at=unbanned_at, hostname=hostname, error=error)
-                    #   Mail notify
+                    #   Notifica via mail dell'errore nel fetch DA FARE!!
                     raise Exception(error)
 
 
@@ -200,18 +257,21 @@ class Action(ActionBase):
         mysql_conn = None
         mysql_cursor = None
 
+        #   Fetch of unban data
         ip = str(aInfo['ip'])
         jname = self._jail.name
 
         try:
 
-                mysql_conn = mysql.connector.connect(
+            #   Database connection
+            mysql_conn = mysql.connector.connect(
                 host=self.host,
                 user=self.user,
                 password=self.password,
                 database=self.database
             )
 
+            #   Cursor creation
             mysql_cursor = mysql_conn.cursor()
 
             mysql_update_query="""UPDATE ban_log SET status=0 
@@ -227,8 +287,8 @@ class Action(ActionBase):
         except mysql.connector.Error as mysql_update_error:
             logger.error(f"Errore di scrittura di MySQL: {mysql_update_error}")
             error = str(mysql_update_error)
-            #   Fallback db write
-            #   Mail notify
+            #   Fallback DB write
+            #   Mail notification!!!
             raise Exception(error)
 
         finally:
@@ -236,22 +296,3 @@ class Action(ActionBase):
                 mysql_cursor.close()
             if mysql_conn:
                 mysql_conn.close()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

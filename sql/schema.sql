@@ -18,6 +18,7 @@ CREATE TABLE `ban_log` (
   `unbanned_at`     datetime        DEFAULT NULL,
   `matches`         text,
   `server_hostname` varchar(64)     NOT NULL,
+  `rcd_created_at`  timestamp       default current_timestamp
 
   -- Geolocation (via ip-api.com)
   `geo_continent_code` varchar(2)   DEFAULT NULL,
