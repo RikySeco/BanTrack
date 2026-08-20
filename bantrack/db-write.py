@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import socket
 from fail2ban.server.action import ActionBase
 
-#   Logging sul journal
+#   Logging on journal
 logger = logging.getLogger('db-write')
 logger.setLevel(logging.ERROR)
 logger.propagate = False
@@ -23,14 +23,13 @@ class Action(ActionBase):
 
         super().__init__(*args, **kwargs)
 
-        #   Recupero della configurazione del database
+        #   Fetch of database config
         dbconfig = configparser.ConfigParser()
         dbconfig.read('/etc/fail2ban/db.conf')
 
         #   Exception
-        #   Mail notification!!!
         if 'database' not in dbconfig:
-            dbconfig_error = "ERRORE: File di configurazione corrotto o inesistente!"
+            dbconfig_error = f"{datetime.now()} - DB ERROR: Database config file is corrupted or missing!"
             logger.error(dbconfig_error)
             #   Mail notification
             raise Exception(dbconfig_error)
@@ -72,7 +71,7 @@ class Action(ActionBase):
             sqlite_conn.commit()
 
         except sqlite3.OperationalError as sqlite_error:
-            logger.error(f"Errore nella scrittura del fallback: {sqlite_error}")
+            logger.error(f"{datetime.now()} - DB ERROR: error writing on fallback DB - {sqlite_error}")
             #   Mail notification!!!
             raise Exception(sqlite_error)
 
@@ -121,7 +120,7 @@ class Action(ActionBase):
             mysql_conn.commit()
 
         except mysql.connector.Error as mysql_error:
-            logger.error(f"Errore di scrittura di MySQL: {mysql_error}")
+            logger.error(f"{datetime.now()} - DB ERROR: error writing on MySQL DB - {mysql_error}")
             error = str(mysql_error)
             self.sqlite_write(ip=ip, jname=jname, failures=failures, bantime=bantime, matches=matches, banned_at=banned_at,
                 unbanned_at=unbanned_at, hostname=hostname, geo_fetched=1,
@@ -175,7 +174,7 @@ class Action(ActionBase):
                 mysql_conn.commit()
 
             except mysql.connector.Error as mysql_update_error:
-                logger.error(f"Errore di scrittura di MySQL: {mysql_update_error}")
+                logger.error(f"{datetime.now()} - BAN ERROR: error writing on MySQL DB - {mysql_update_error}")
                 error = str(mysql_update_error)
                 #   Fallback write
                 #   Mail notification!!!
@@ -234,19 +233,19 @@ class Action(ActionBase):
             #   Case where ip-api replay status=fail
             else:
                 if geo_status == 'fail':
-                    logger.error("Errore: Indirizzo IP non riconosciuto")
-                    error = "Errore di ip API"
+                    logger.error(f"{datetime.now()} - BAN ERROR: IP address not known")
+                    error = "BAN ERROR: ip-api error"
                     self.sqlite_write(ip=ip, jname=jname, failures=failures, bantime=bantime, matches=matches,
                                  banned_at=banned_at,
                                  unbanned_at=unbanned_at, hostname=hostname, error=error)
-                    #   Notifica via mail dell'errore nel fetch DA FARE!!
+                    #   Mail notification!!
                     raise Exception(error)
 
 
 
         #   Case where there's an HTTP error
         except (requests.exceptions.ConnectionError, requests.exceptions.JSONDecodeError) as http_error:
-            logger.error(f"Errore di connessione all'API: {http_error}")
+            logger.error(f"{datetime.now()} - BAN ERROR: error connecting to ip-api - {http_error}")
             error = str(http_error)
             self.sqlite_write(ip=ip, jname=jname, failures=failures, bantime=bantime, matches=matches, banned_at=banned_at,
                          unbanned_at=unbanned_at, hostname=hostname, error=error)
@@ -285,7 +284,7 @@ class Action(ActionBase):
             mysql_conn.commit()
 
         except mysql.connector.Error as mysql_update_error:
-            logger.error(f"Errore di scrittura di MySQL: {mysql_update_error}")
+            logger.error(f"{datetime.now()} - UNBAN ERROR: error writing on MySQL database - {mysql_update_error}")
             error = str(mysql_update_error)
             #   Fallback DB write
             #   Mail notification!!!
